@@ -53,7 +53,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-$width: 5.336179295vh;
+// $width: 5.336179295vh;
+$width: 4.8vh;
 $height: $width * 30 / 23;
 $rounding: $width * 0.1;
 $hover-offset: $width * 0.2;

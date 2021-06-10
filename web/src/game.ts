@@ -1,6 +1,6 @@
 import alea from 'alea';
 
-import { nextTile, previousTile, Suit, TileKind, tiles, WindKind } from './tiles';
+import { Meld, allMelds, nextTile, previousTile, Suit, TileKind, tiles, WindKind, allTiles } from './tiles';
 import { Packet } from '@mfro/ts-common/sockets';
 import { assert } from '@mfro/ts-common/assert';
 import { shallowReactive } from '@vue/reactivity';
@@ -30,7 +30,8 @@ export interface MasterView extends GameView {
   players: KnownPlayer[];
 }
 
-export interface Meld {
+export interface OpenMeld {
+  meld: Meld;
   tiles: Tile[];
   extended: boolean;
   claimedPlayer: number;
@@ -46,7 +47,7 @@ export interface Player {
   draw: Tile | null;
   discard: KnownTile[];
   discarded: Set<TileKind>;
-  open: Meld[];
+  open: OpenMeld[];
   declaredKan: ConcealedKan[];
 }
 
@@ -61,26 +62,20 @@ export interface Game {
   local: number | null;
 
   pass(player: number): void;
-  call(player: number, meld: Meld): void;
+  call(player: number, meld: OpenMeld): void;
   discard(tile: Tile): void;
   declareKan(kind: TileKind, tiles: Tile[]): void;
 }
 
-interface PendingCall {
+interface Call {
   player: number;
-  meld: Meld;
+  result: OpenMeld;
 }
 
 export type GamePhase =
   | { type: 'complete' }
   | { type: 'discarding', player: number }
-  | { type: 'calling', player: number, pending: PendingCall[] };
-
-// const StartGame = Packet.define<{ dealer: number, position: number, prevailing: WindKind, doraIndicators: TileKind[], tilesRemaining: number, hand: TileKind[] }>();
-// const PlayerDraw = Packet.define<{ position: number, tile: null | TileKind }>();
-// const PlayerDiscard = Packet.define<{ position: number, tile: TileKind }>();
-// const PlayerCall = Packet.define<{ position: number, claimedPlayer: number, revealed: TileKind[] }>();
-// const PlayerDeclareKan = Packet.define<{ tile: TileKind, doraIndicator: number }>();
+  | { type: 'calling', player: number, pending: Call[], called: Call[] };
 
 /** To the left */
 export function nextPlayer(state: GameView, player: number) {
@@ -103,49 +98,93 @@ export function otherPlayers(state: GameView, player: number) {
   return list;
 }
 
-/** Find all winning hands using a drawn or discarded tile */
-export function findHands(seed: TileKind, hand: TileKind[]) {
-  return [];
+export type Hand =
+  | { melds: TileKind[][]; pair: TileKind[] }
+  | { pairs: TileKind[][] };
+
+export function findHands(kinds: TileKind[]): Hand[] {
+  if (kinds.length == 2) {
+    if (kinds[0] == kinds[1])
+      return [{ melds: [], pair: kinds }];
+
+    return [];
+  }
+
+  const list = [];
+  for (const meld of allMelds) {
+    const next = kinds.slice();
+    const valid = meld.every(kind => {
+      const index = next.indexOf(kind);
+      if (index == -1) return false;
+      next.splice(index, 1);
+      return true;
+    });
+
+    if (valid) {
+      for (const base of findHands(next)) {
+        assert('melds' in base, '7 pairs?');
+        list.push({
+          melds: [meld, ...base.melds],
+          pair: base.pair,
+        });
+      }
+    }
+  }
+
+  return list;
+}
+
+/** Find all tiles that would complete the specified hand */
+export function findWaits(melds: TileKind[][], hand: TileKind[]) {
+  const waits = [];
+
+  for (const seed of allTiles) {
+    const hands = findHands([seed, ...hand]);
+    if (hands.length == 0) return;
+
+    waits.push({ seed, hands });
+  }
+
+  return waits;
 }
 
 /** Check if the hand can call a pon on a drawn or discarded tile */
-export function canPon(seed: TileKind, hand: TileKind[]) {
-  return hand.filter(k => k == seed).length >= 2;
+export function findPon(seed: KnownTile, hand: KnownTile[]): null | { meld: Meld, tiles: KnownTile[] } {
+  const matches = hand.filter(k => k.kind == seed.kind);
+  if (matches.length < 2) return null;
+
+  const meld = allMelds.find(m => m.length == 3 && m.every(t => t == seed.kind));
+  assert(meld != null, 'pon');
+  return { meld, tiles: [seed, ...matches.slice(0, 2)] };
 }
 
 /** Check if the hand can call a kan on a drawn or discarded tile */
-export function canKan(seed: TileKind, hand: TileKind[]) {
-  return hand.filter(k => k == seed).length >= 3;
+export function findKan(seed: KnownTile, hand: KnownTile[]): null | { meld: Meld, tiles: KnownTile[] } {
+  const matches = hand.filter(k => k.kind == seed.kind);
+  if (matches.length < 3) return null;
+
+  const meld = allMelds.find(m => m.length == 4 && m.every(k => k == seed.kind));
+  assert(meld != null, 'pon');
+  return { meld, tiles: [seed, ...matches.slice(0, 3)] };
 }
 
 /** Find all chii that can be called on a drawn or discarded tile */
-export function findChii(seed: TileKind, hand: TileKind[]) {
-  return allChii(seed)
-    .filter(meld => meld.every(k => hand.includes(k)));
-}
+export function findChii(seed: KnownTile, hand: KnownTile[]): { meld: Meld, tiles: KnownTile[] }[] {
+  return allMelds.map(m => {
+    if (!m.includes(seed.kind) || m.every(k => k == seed.kind))
+      return null;
 
-/** Find all chii that include a specified tile */
-export function allChii(seed: TileKind) {
-  if (seed.suit == Suit.Wind || seed.suit == Suit.Dragon)
-    return [];
+    const tiles = m.map(k => k == seed.kind ? seed : hand.find(t => t.kind == k));
+    if (tiles.some(t => t == null))
+      return null;
 
-  const list = [];
+    const index = tiles.indexOf(seed);
+    tiles.splice(index, 1);
+    tiles.splice(0, 0, seed);
 
-  const p1 = nextTile(seed);
-  const p2 = nextTile(p1);
-  const m1 = previousTile(seed);
-  const m2 = previousTile(m1);
-
-  if (seed.value < 8)
-    list.push([p1, p2]);
-
-  if (seed.value < 9 && seed.value > 1)
-    list.push([m1, p1]);
-
-  if (seed.value > 2)
-    list.push([m2, m1]);
-
-  return list;
+    return { meld: m, tiles: tiles! };
+  })
+    .filter(v => v != null) as { meld: Meld, tiles: KnownTile[] }[];
 }
 
 export function newDeck(seed: number): KnownTile[] {
@@ -218,27 +257,28 @@ export function newLocalGame(seed: number): Game {
   function doCalling(player: number, order: number): GamePhase {
     const seed = players[player].discard[players[player].discard.length - 1];
 
-    const pending: PendingCall[] = [];
+    const pending: Call[] = [];
     for (const other of otherPlayers(state, player)) {
       const tiles = players[other].hand;
-      const kinds = tiles.map(t => t.kind);
 
-      if (canPon(seed.kind, kinds)) {
+      const pon = findPon(seed, tiles);
+      if (pon != null) {
         pending.push({
           player: other,
-          meld: {
-            tiles: [seed, ...tiles.filter(t => t.kind == seed.kind).slice(0, 2)],
+          result: {
+            ...pon,
             extended: false,
             claimedPlayer: player,
           },
         });
       }
 
-      if (canKan(seed.kind, kinds)) {
+      const kan = findKan(seed, tiles);
+      if (kan != null) {
         pending.push({
           player: other,
-          meld: {
-            tiles: [seed, ...tiles.filter(t => t.kind == seed.kind).slice(0, 3)],
+          result: {
+            ...kan,
             extended: false,
             claimedPlayer: player,
           },
@@ -246,12 +286,11 @@ export function newLocalGame(seed: number): Game {
       }
 
       if (other == nextPlayer(state, player)) {
-        for (const chii of findChii(seed.kind, kinds)) {
-          const mapped = chii.map(k => tiles.find(t => t.kind == k)!);
+        for (const chii of findChii(seed, tiles)) {
           pending.push({
             player: other,
-            meld: {
-              tiles: [seed, ...mapped],
+            result: {
+              ...chii,
               extended: false,
               claimedPlayer: player,
             },
@@ -263,7 +302,37 @@ export function newLocalGame(seed: number): Game {
     if (pending.length == 0)
       return doDraw(nextPlayer(state, player));
 
-    return { type: 'calling', player, pending };
+    return { type: 'calling', player, pending, called: [] };
+  }
+
+  function updateCalling() {
+    assert(game.phase.type == 'calling', 'calling phase');
+
+    if (game.phase.pending.length > 0) return;
+
+    let player;
+    if (game.phase.called.length == 0) {
+      player = nextPlayer(game.state, game.phase.player);
+    } else {
+      assert(game.phase.called.length == 1, 'TODO call prioritization');
+
+      const call = game.phase.called[0];
+
+      const target = game.state.players[call.player];
+      target.open.push(call.result);
+
+      for (const tile of call.result.tiles.slice(1)) {
+        const index = target.hand.indexOf(tile);
+        target.hand.splice(index, 1);
+      }
+
+      const victim = game.state.players[game.phase.player];
+      victim.discard.pop();
+
+      player = call.player;
+    }
+
+    game.phase = { type: 'discarding', player };
   }
 
   const game: Game = shallowReactive({
@@ -281,28 +350,27 @@ export function newLocalGame(seed: number): Game {
       }
 
       if (game.phase.pending.length == 0) {
-        game.phase = doDraw(nextPlayer(state, player));
+        game.phase = doDraw(nextPlayer(state, game.phase.player));
       }
     },
 
     call(player, meld) {
       assert(game.phase.type == 'calling', 'calling phase');
 
-      const index = game.phase.pending.findIndex(p => p.player == player && p.meld == meld);
-      assert(index != -1, 'calling player');
+      const calls = game.phase.pending.filter(p => p.player == player);
 
-      const target = game.state.players[player];
-      target.open.push(meld);
+      const call = calls.find(p => p.result == meld);
+      assert(call != null, 'call exists');
 
-      for (const tile of meld.tiles.slice(1)) {
-        const index = target.hand.indexOf(tile);
-        target.hand.splice(index, 1);
+      for (const c of calls) {
+        const index = game.phase.pending.indexOf(c);
+        assert(index != -1, 'call exists 2');
+        game.phase.pending.splice(index, 1);
       }
 
-      const victim = game.state.players[game.phase.player];
-      victim.discard.pop();
+      game.phase.called.push(call);
 
-      game.phase = { type: 'discarding', player };
+      updateCalling();
     },
 
     discard(tile) {

@@ -5,7 +5,7 @@
 
     <v-flex>
       <tile
-        v-for="tile in player.hand"
+        v-for="tile in sorted"
         :key="tile.id"
         :tile="visible ? tile : null"
         :active="visible && isDiscarding"
@@ -33,6 +33,8 @@ import { computed, inject } from 'vue';
 
 import Tile from './tile';
 
+import { allTiles } from '../tiles';
+
 export default {
   name: 'hand',
   components: {
@@ -51,6 +53,12 @@ export default {
       return game.state.players.indexOf(props.player);
     });
 
+    const sorted = computed(() => {
+      return props.player.hand.slice().sort((a, b) => {
+        return allTiles.indexOf(a.kind) - allTiles.indexOf(b.kind);
+      });
+    });
+
     const isDiscarding = computed(() => {
       return game.phase.type == 'discarding'
         && game.phase.player == index.value;
@@ -58,6 +66,7 @@ export default {
 
     return {
       game,
+      sorted,
       isDiscarding,
 
       onClick(tile) {

@@ -1,0 +1,6 @@
+- furiten
+- swap calls
+- kan promotion
+- ron
+- tsumo
+- winning conditions

@@ -18,16 +18,32 @@
       <hand :player="acrossPlayer" :visible="true" />
       <hand :player="rightPlayer" :visible="true" />
 
-      <v-flex column class="pa-2" align-start>
-        <v-button
-          class="mb-2 py-1"
-          style="height: auto"
-          v-for="{ meld, player } in allCalls"
-          :key="meld"
-          @click="call(player, meld)"
+      <v-flex>
+        <v-flex
+          column
+          class="pa-2"
+          align-start
+          v-for="[player, list] in allCalls"
+          :key="player"
         >
-          <meld :player="player" :meld="meld" small />
-        </v-button>
+          <v-button
+            class="mb-2 py-1"
+            style="height: auto"
+            v-for="result in list"
+            :key="result"
+            @click="call(player, result)"
+          >
+            <meld :player="player" :meld="result" small />
+          </v-button>
+
+          <v-button
+            class="mb-2 py-1"
+            style="height: auto"
+            @click="pass(player)"
+          >
+            Pass
+          </v-button>
+        </v-flex>
       </v-flex>
     </v-flex>
   </v-app>
@@ -78,16 +94,26 @@ export default {
 
     const allCalls = computed(() => {
       if (props.game.phase.type != 'calling')
-        return [];
+        return new Map();
 
-      const matches = props.game.phase.pending;
+      const byPlayer = new Map();
 
-      return matches;
+      for (const { result, player } of props.game.phase.pending) {
+        const list = byPlayer.get(player);
+        if (!list) byPlayer.set(player, list = []);
+        list.push(result);
+      }
+
+      return [...byPlayer];
     });
 
     return {
       localPlayer, leftPlayer, rightPlayer, acrossPlayer,
       allCalls,
+
+      pass(player) {
+        props.game.pass(player);
+      },
 
       call(player, meld) {
         props.game.call(player, meld);

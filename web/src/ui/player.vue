@@ -101,12 +101,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.discard {
-  display: grid;
-  grid-template-rows: repeat(3, 1fr);
-  grid-template-columns: repeat(6, 1fr);
-}
-
 .melds {
   position: absolute;
   top: 0;
