@@ -254,7 +254,7 @@ export function newLocalGame(seed: number): Game {
     return { type: 'discarding', player };
   }
 
-  function doCalling(player: number, order: number): GamePhase {
+  function doCalling(player: number): GamePhase {
     const seed = players[player].discard[players[player].discard.length - 1];
 
     const pending: Call[] = [];
@@ -343,24 +343,7 @@ export function newLocalGame(seed: number): Game {
     pass(player) {
       assert(game.phase.type == 'calling', 'calling phase');
 
-      while (true) {
-        const index = game.phase.pending.findIndex(p => p.player == player);
-        if (index == -1) break;
-        game.phase.pending.splice(index, 1);
-      }
-
-      if (game.phase.pending.length == 0) {
-        game.phase = doDraw(nextPlayer(state, game.phase.player));
-      }
-    },
-
-    call(player, meld) {
-      assert(game.phase.type == 'calling', 'calling phase');
-
       const calls = game.phase.pending.filter(p => p.player == player);
-
-      const call = calls.find(p => p.result == meld);
-      assert(call != null, 'call exists');
 
       for (const c of calls) {
         const index = game.phase.pending.indexOf(c);
@@ -368,6 +351,21 @@ export function newLocalGame(seed: number): Game {
         game.phase.pending.splice(index, 1);
       }
 
+      updateCalling();
+    },
+
+    call(player, meld) {
+      assert(game.phase.type == 'calling', 'calling phase');
+
+      const calls = game.phase.pending.filter(p => p.player == player);
+      for (const c of calls) {
+        const index = game.phase.pending.indexOf(c);
+        assert(index != -1, 'call exists 2');
+        game.phase.pending.splice(index, 1);
+      }
+
+      const call = calls.find(p => p.result == meld);
+      assert(call != null, 'call exists');
       game.phase.called.push(call);
 
       updateCalling();
@@ -396,7 +394,7 @@ export function newLocalGame(seed: number): Game {
       player.discard.push(tile);
       player.discarded.add(tile.kind);
 
-      game.phase = doCalling(game.phase.player, 0);
+      game.phase = doCalling(game.phase.player);
     },
 
     declareKan(kind, tiles) {
