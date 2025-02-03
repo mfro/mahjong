@@ -1,5 +1,5 @@
-import { filterMap } from '@/util';
-import { Meld, Tile, Wind } from './tiles';
+import { filterMap, unique } from '@/util';
+import { Meld, Tile, TileKind, Wind } from './tiles';
 import { assert } from '@mfro/ts-common/assert';
 
 export * from './tiles';
@@ -26,15 +26,16 @@ export interface Player {
   draw: Tile | null;
   discard: Tile[];
   open: OpenMeld[];
-  declaredFours: Tile[];
+  declaredQuads: Meld[];
 }
 
 export namespace Player {
   export function getAllTiles(player: Player) {
     return [
-      ...player.declaredFours.flat(),
+      ...player.declaredQuads.flat(),
       ...player.open.flatMap(meld => meld.value),
       ...player.hand,
+      ...(player.draw ? [player.draw] : []),
     ];
   }
 }
@@ -44,20 +45,26 @@ export type Hand =
   | { pairs: Tile[][] }
   | { orphans: Tile[]; pair: Tile[] };
 
+interface CallOption {
+  player: number;
+  result: Meld;
+}
+
 interface Call {
   player: number;
   result: Meld;
+  win: boolean;
 }
 
 export type GameState =
   | { type: 'done' }
   | { type: 'discarding', player: number }
-  | { type: 'calling', from: number, tile: Tile, pending: Call[], called: Call[] };
+  | { type: 'calling', from: number, tile: Tile, pending: CallOption[], called: Call[] };
 
 export type Input =
-  | { type: 'declare four', tile: Tile }
+  | { type: 'declare quad', tile: Meld }
   | { type: 'discard', tile: Tile }
-  | { type: 'call', player: number, meld: Meld }
+  | { type: 'call', player: number, meld: Meld, win: boolean }
   | { type: 'pass', player: number }
 
 export namespace Game {
@@ -86,9 +93,33 @@ export namespace Game {
 
     const hands = buildHands(hand);
 
-    // TODO winning conditions
-
     return hands.length > 0;
+  }
+
+  /** complete with at least one winning condition */
+  export function isHandWin(hand: Tile[]) {
+    // TODO winning conditions
+    return isHandComplete(hand);
+  }
+
+  function buildMelds(kinds: readonly TileKind[], hand: Tile[]): Tile[][] {
+    if (kinds.length == 0) return [[]];
+
+    const kind = kinds[0];
+    const rest = kinds.slice(1);
+
+    const options = unique(hand.filter(t => t.kind == kind), Tile.equals);
+
+    const results = [];
+    for (const tile of options) {
+      const remainingHand = hand.filter(t => t != tile);
+
+      for (const tail of buildMelds(rest, remainingHand)) {
+        results.push([tile, ...tail]);
+      }
+    }
+
+    return results;
   }
 
   export function buildHands(hand: Tile[]): Hand[] {
@@ -100,21 +131,17 @@ export namespace Game {
     }
 
     const list = [];
-    for (const meld of Meld.all) {
-      const next = hand.slice();
-      const valid = meld.every(kind => {
-        const index = next.indexOf(kind);
-        if (index == -1) return false;
-        next.splice(index, 1);
-        return true;
-      });
+    for (const kinds of Meld.all) {
+      const melds = buildMelds(kinds, hand).map(Meld.of);
+      const options = unique(melds, Meld.isIdentical);
 
-      if (valid) {
-        for (const base of buildHands(next)) {
-          assert('melds' in base, '7 pairs?');
+      for (const option of options) {
+        const remainingHand = hand.filter(t => !option.includes(t));
+        for (const tail of buildHands(remainingHand)) {
+          assert('melds' in tail, '7 pairs?');
           list.push({
-            melds: [meld, ...base.melds],
-            pair: base.pair,
+            melds: [option, ...tail.melds],
+            pair: tail.pair,
           });
         }
       }
@@ -127,44 +154,48 @@ export namespace Game {
   export function findWaits(melds: Meld[], hand: Tile[]) {
     const waits = [];
 
-    for (const seed of Tile.all) {
-      const hands = buildHands([seed, ...hand]);
+    for (const kind of TileKind.all) {
+      const tile = Tile.plain(kind);
+      const hands = buildHands([tile, ...hand]);
       if (hands.length == 0) return;
 
-      waits.push({ seed, hands });
+      waits.push({ seed: kind, hands });
     }
 
     return waits;
   }
 
-  /** Check if the hand can call a three on a discarded tile */
-  export function canCallThree(seed: Tile, hand: Tile[]) {
-    const matches = hand.filter(k => k == seed);
-    return matches.length >= 2;
+  /** Check if the hand can call a triple on a discarded tile */
+  export function findTriples(seed: Tile, hand: Tile[]): Meld[] {
+    const options = buildMelds([seed.kind, seed.kind], hand)
+      .map(tiles => Meld.of([seed, ...tiles]))
+
+    return unique(options, Meld.isIdentical);
   }
 
-  /** Check if the hand can call a four on a discarded tile */
-  export function canCallFour(seed: Tile, hand: Tile[]) {
-    const matches = hand.filter(k => k == seed);
-    return matches.length >= 3;
+  /** Check if the hand can call a quad on a discarded tile */
+  export function findQuads(seed: Tile, hand: Tile[]) {
+    const options = buildMelds([seed.kind, seed.kind, seed.kind], hand)
+      .map(tiles => Meld.of([seed, ...tiles]))
+
+    return unique(options, Meld.isIdentical);
   }
 
   /** Find all sequences that can be called on a discarded tile */
   export function findSequences(seed: Tile, hand: Tile[]): Meld[] {
-    return filterMap(Meld.allSequences, meld => {
-      const others = meld.filter(t => t != seed);
-      if (others.length == 2 && others.every(t => hand.includes(t))) {
-        return meld;
+    return filterMap(Meld.getSequenceOptions(seed.kind), others => {
+      for (const sequence of buildMelds(others, hand)) {
+        return Meld.of([seed, ...sequence]);
       }
     });
   }
 
   export function newDeck(): Tile[] {
     const pool = [
-      ...Tile.all,
-      ...Tile.all,
-      ...Tile.all,
-      ...Tile.all,
+      ...TileKind.all.map(Tile.plain),
+      ...TileKind.all.map(Tile.plain),
+      ...TileKind.all.map(Tile.plain),
+      ...TileKind.all.map(Tile.plain),
     ];
     const deck = [];
 
@@ -192,7 +223,7 @@ export namespace Game {
         draw: null,
         discard: [],
         open: [],
-        declaredFours: [],
+        declaredQuads: [],
       });
     }
 
@@ -209,38 +240,38 @@ export namespace Game {
     return game;
   }
 
-  export function getDeclaredFours(game: Game) {
-    const fours = game.players
-      .flatMap(p => p.declaredFours);
+  export function getDeclaredQuads(game: Game) {
+    const quads = game.players
+      .flatMap(p => p.declaredQuads);
 
-    return fours;
+    return quads;
   }
 
   export function getBonusIndicators(game: Game) {
-    const fours = getDeclaredFours(game).length;
+    const quads = getDeclaredQuads(game).length;
 
-    const offset = 4 - fours;
+    const offset = 4 - quads;
     const list = [];
 
-    for (let i = 0; i < fours + 1; ++i) {
+    for (let i = 0; i < quads + 1; ++i) {
       list.push(game.deck[offset + i * 2]);
     }
   }
 
   export function getHiddenBonusIndicators(game: Game) {
-    const fours = game.players
-      .map(p => p.declaredFours.length)
+    const quads = game.players
+      .map(p => p.declaredQuads.length)
       .reduce((a, b) => a + b, 0);
 
-    const offset = 4 - fours;
+    const offset = 4 - quads;
     const list = [];
 
-    for (let i = 0; i < fours + 1; ++i) {
+    for (let i = 0; i < quads + 1; ++i) {
       list.push(game.deck[offset + i * 2]);
     }
   }
 
-  export function applyFour(game: Game, player: number) {
+  export function applyQuad(game: Game, player: number) {
     const drawTile = game.deck.shift();
     assert(drawTile != null, 'invalid deck state');
 
@@ -260,18 +291,25 @@ export namespace Game {
     }
   }
 
+  function getCallPriority(a: Call) {
+    return (a.win ? 2 : 0)
+      + (Meld.isSet(a.result) ? 1 : 0);
+  }
+
+  function compareCallPriority(a: Call, b: Call) {
+    return (getCallPriority(a) - getCallPriority(b));
+  }
+
   export function updateCallState(game: Game) {
     assert(game.state.type == 'calling', 'calling phase');
 
     if (game.state.pending.length > 0) return;
 
-    if (game.state.called.length == 0) {
-      draw(game, nextPlayer(game, game.state.from));
-    } else {
-      assert(game.state.called.length == 1, 'TODO call prioritization');
+    const call = [...game.state.called]
+      .sort(compareCallPriority)
+      .pop();
 
-      const call = game.state.called[0];
-
+    if (call) {
       const target = game.players[call.player];
       target.open.push({
         value: call.result,
@@ -279,8 +317,8 @@ export namespace Game {
         claimedFrom: game.state.from,
       });
 
-      for (const tile of call.result.slice(1)) {
-        const index = target.hand.indexOf(tile);
+      for (const tile of Meld.getRest(call.result, game.state.tile.kind)) {
+        const index = target.hand.indexOf(tile)
         target.hand.splice(index, 1);
       }
 
@@ -288,6 +326,8 @@ export namespace Game {
       victim.discard.pop();
 
       game.state = { type: 'discarding', player: call.player };
+    } else {
+      draw(game, nextPlayer(game, game.state.from));
     }
   }
 
@@ -296,8 +336,8 @@ export namespace Game {
       && game.players[game.state.player] == player;
   }
 
-  export function getFourOptions(game: Game) {
-    if (game.state.type != 'discarding' || getDeclaredFours(game).length == 4) {
+  export function getQuadOptions(game: Game) {
+    if (game.state.type != 'discarding' || getDeclaredQuads(game).length == 4) {
       return [];
     }
 
@@ -322,22 +362,16 @@ export namespace Game {
     player.hand.splice(index, 1);
     player.discard.push(tile);
 
-    const pending: Call[] = [];
+    const pending: CallOption[] = [];
     for (const other of otherPlayers(game, game.state.player)) {
       const tiles = game.players[other].hand;
 
-      if (canCallThree(tile, tiles)) {
-        pending.push({
-          player: other,
-          result: Meld.three(tile),
-        });
+      for (const result of findTriples(tile, tiles)) {
+        pending.push({ player: other, result });
       }
 
-      if (canCallFour(tile, tiles)) {
-        pending.push({
-          player: other,
-          result: Meld.four(tile),
-        });
+      for (const result of findQuads(tile, tiles)) {
+        pending.push({ player: other, result });
       }
 
       if (other == nextPlayer(game, game.state.player)) {
@@ -357,20 +391,20 @@ export namespace Game {
     }
   }
 
-  export function declareFour(game: Game, tile: Tile) {
+  export function declareQuad(game: Game, meld: Meld) {
     assert(game.state.type == 'discarding', 'invalid discard');
     const player = game.players[game.state.player];
 
-    for (let i = 0; i < 4; ++i) {
+    for (const tile of meld) {
       const index = player.hand.indexOf(tile);
-      assert(index != -1, 'invalid declare four');
+      assert(index != -1, 'invalid declare quad');
       player.hand.splice(index);
     }
 
-    player.declaredFours.push(tile);
+    player.declaredQuads.push(meld);
   }
 
-  export function call(game: Game, player: number, meld: Meld) {
+  export function call(game: Game, player: number, meld: Meld, win: boolean) {
     assert(game.state.type == 'calling', 'calling phase');
 
     const calls = game.state.pending.filter(p => p.player == player);
@@ -378,7 +412,11 @@ export namespace Game {
 
     const call = calls.find(p => p.result == meld);
     assert(call != null, 'call exists');
-    game.state.called.push(call);
+    game.state.called.push({
+      player: call.player,
+      result: call.result,
+      win,
+    });
 
     updateCallState(game);
   }
@@ -386,12 +424,7 @@ export namespace Game {
   export function pass(game: Game, player: number) {
     assert(game.state.type == 'calling', 'invalid call');
 
-    const calls = game.state.pending.filter(p => p.player == player);
-    for (const c of calls) {
-      const index = game.state.pending.indexOf(c);
-      assert(index != -1, 'call exists 2');
-      game.state.pending.splice(index, 1);
-    }
+    game.state.pending = game.state.pending.filter(p => p.player != player);
 
     updateCallState(game);
   }
@@ -399,10 +432,10 @@ export namespace Game {
   export function input(game: Game, input: Input) {
     if (input.type == 'discard') {
       discard(game, input.tile);
-    } else if (input.type == 'declare four') {
-      declareFour(game, input.tile);
+    } else if (input.type == 'declare quad') {
+      declareQuad(game, input.tile);
     } else if (input.type == 'call') {
-      call(game, input.player, input.meld);
+      call(game, input.player, input.meld, input.win);
     } else if (input.type == 'pass') {
       pass(game, input.player);
     }

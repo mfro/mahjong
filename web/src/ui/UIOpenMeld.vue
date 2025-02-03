@@ -9,10 +9,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { assert } from '@mfro/ts-common/assert';
 
 import { CONTEXT } from './common';
-import { Game, Tile, type OpenMeld, type Player } from '@/common';
+import { Game, Meld, Tile, TileKind, type OpenMeld, type Player } from '@/common';
 
 import Flex from './common/Flex.vue';
 import UITile from './UITile.vue';
@@ -39,11 +38,8 @@ const rotated = computed(() => {
 
 const tiles = computed(() => {
   const claimed = props.meld.claimed;
-  const rest = props.meld.value.slice();
-  const index = rest.indexOf(claimed);
-  assert(index != -1, 'invalid meld');
-  rest.splice(index, 1);
-  rest.sort(Tile.compare);
+  const rest = Meld.getRest(props.meld.value, claimed.kind)
+    .sort(Tile.compare);
 
   if (props.meld.claimedFrom == Game.previousPlayer(game, playerIndex.value))
     return [claimed, ...rest];

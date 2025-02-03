@@ -1,6 +1,6 @@
 import master from './assets/tiles.svg?raw';
 import { assert } from '@mfro/ts-common/assert';
-import { Suit, Tile } from './common';
+import { Suit, TileKind } from './common';
 
 const artLookup = load();
 
@@ -49,7 +49,7 @@ function getArtName(artName: string) {
   return art;
 }
 
-export function getArt(tile: Tile) {
+export function getArt(tile: TileKind) {
   if (tile.suit == Suit.Cracks)
     return getArtName(`cracks/${tile.value}`);
 
@@ -59,25 +59,25 @@ export function getArt(tile: Tile) {
   else if (tile.suit == Suit.Balls)
     return getArtName(`balls/${tile.value}`);
 
-  else if (tile == Tile.red)
+  else if (tile == TileKind.red)
     return getArtName('honor/red dragon');
 
-  else if (tile == Tile.green)
+  else if (tile == TileKind.green)
     return getArtName('honor/green dragon');
 
-  else if (tile == Tile.white)
+  else if (tile == TileKind.white)
     return getArtName('honor/white dragon');
 
-  else if (tile == Tile.east)
+  else if (tile == TileKind.east)
     return getArtName('honor/east wind');
 
-  else if (tile == Tile.west)
+  else if (tile == TileKind.west)
     return getArtName('honor/west wind');
 
-  else if (tile == Tile.north)
+  else if (tile == TileKind.north)
     return getArtName('honor/north wind');
 
-  else if (tile == Tile.south)
+  else if (tile == TileKind.south)
     return getArtName('honor/south wind');
 
   else

@@ -11,14 +11,10 @@
 <script setup lang="ts">
 import { reactive } from 'vue';
 
-import { Game, Tile } from '@/common';
+import { Game, Tile, TileKind } from '@/common';
 import { CONTEXT, type Context } from './common';
 
-import Button from 'primevue/button';
-
 import Flex from './common/Flex.vue';
-import UIHand from './UIHand.vue';
-import UIDiscard from './UIDiscard.vue';
 import DebugPlayer from './DebugPlayer.vue';
 
 const context: Context = reactive({
@@ -37,11 +33,13 @@ const context: Context = reactive({
 CONTEXT.set(context);
 const game = context.game;
 
-game.players[1].hand[0] = Tile.balls[0];
-game.players[1].hand[1] = Tile.balls[1];
-game.players[1].hand[2] = Tile.balls[3];
-game.players[1].hand[3] = Tile.balls[4];
-game.players[0].draw = Tile.balls[2];
+game.players[1].hand[0] = Tile.plain(TileKind.balls[0]);
+game.players[1].hand[1] = Tile.plain(TileKind.balls[1]);
+game.players[1].hand[2] = Tile.plain(TileKind.balls[3]);
+game.players[1].hand[3] = Tile.plain(TileKind.balls[4]);
+game.players[0].draw = Tile.plain(TileKind.balls[2]);
+game.players[2].hand[0] = Tile.plain(TileKind.balls[2]);
+game.players[2].hand[1] = Tile.plain(TileKind.balls[2]);
 </script>
 
 <style scoped lang="scss"></style>

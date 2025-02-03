@@ -1,4 +1,29 @@
+import { never, unique } from '@/util';
 import { assert } from '@mfro/ts-common/assert';
+
+export interface Tile {
+  readonly kind: TileKind;
+  readonly isRed: boolean;
+}
+
+export namespace Tile {
+  export function plain(kind: TileKind): Tile {
+    return Object.freeze({
+      kind,
+      isRed: false,
+    });
+  }
+
+  export function equals(a: Tile, b: Tile): boolean {
+    return a.kind == b.kind
+      && a.isRed == b.isRed;
+  }
+
+  export function compare(a: Tile, b: Tile) {
+    return TileKind.compare(a.kind, b.kind)
+      || (a.isRed != b.isRed ? (a.isRed ? 1 : -1) : 0);
+  }
+}
 
 export enum Suit {
   Cracks,
@@ -12,19 +37,19 @@ export enum Wind { East, West, North, South }
 export enum Dragon { Red, Green, White }
 export type TileNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
-export type Tile =
-  | { suit: Suit.Cracks | Suit.Sticks | Suit.Balls, value: TileNumber }
-  | { suit: Suit.Dragon, value: Dragon }
-  | { suit: Suit.Wind, value: Wind };
+export type TileKind =
+  | { readonly suit: Suit.Cracks | Suit.Sticks | Suit.Balls, readonly value: TileNumber }
+  | { readonly suit: Suit.Dragon, readonly value: Dragon }
+  | { readonly suit: Suit.Wind, readonly value: Wind };
 
-export namespace Tile {
-  export const all: Tile[] = [];
+export namespace TileKind {
+  export const all: TileKind[] = [];
 
-  function define(suit: Suit.Cracks | Suit.Sticks | Suit.Balls, value: TileNumber): Tile;
-  function define(suit: Suit.Dragon, value: Dragon): Tile;
-  function define(suit: Suit.Wind, value: Wind): Tile;
-  function define(suit: Suit, value: TileNumber | Wind | Dragon): Tile {
-    const tile = Object.freeze({ suit, value }) as Tile;
+  function define(suit: Suit.Cracks | Suit.Sticks | Suit.Balls, value: TileNumber): TileKind;
+  function define(suit: Suit.Dragon, value: Dragon): TileKind;
+  function define(suit: Suit.Wind, value: Wind): TileKind;
+  function define(suit: Suit, value: TileNumber | Wind | Dragon): TileKind {
+    const tile = Object.freeze({ suit, value }) as TileKind;
 
     all.push(tile);
 
@@ -76,7 +101,7 @@ export namespace Tile {
   export const green = define(Suit.Dragon, Dragon.Green);
   export const white = define(Suit.Dragon, Dragon.White);
 
-  export function next(tile: Tile): Tile {
+  export function next(tile: TileKind): TileKind {
     if (tile.suit == Suit.Wind) {
       if (tile.value == Wind.East)
         return south;
@@ -118,7 +143,7 @@ export namespace Tile {
     assert(false, 'impossible');
   }
 
-  export function previous(tile: Tile): Tile {
+  export function previous(tile: TileKind): TileKind {
     if (tile.suit == Suit.Wind) {
       if (tile.value == Wind.East)
         return north;
@@ -160,24 +185,44 @@ export namespace Tile {
     assert(false, 'impossible');
   }
 
-  export function compare(a: Tile, b: Tile) {
+  export function compare(a: TileKind, b: TileKind) {
     return all.indexOf(a) - all.indexOf(b);
+  }
+
+  export function get(suit: Suit.Cracks | Suit.Sticks | Suit.Balls, value: TileNumber): TileKind;
+  export function get(suit: Suit.Dragon, value: Dragon): TileKind;
+  export function get(suit: Suit.Wind, value: Wind): TileKind;
+  export function get(suit: Suit, value: number) {
+    return all.find(k => k.suit == suit && k.value == value);
+  }
+
+  export function numbered(suit: Suit.Cracks | Suit.Sticks | Suit.Balls) {
+    if (suit == Suit.Cracks) return cracks;
+    if (suit == Suit.Sticks) return sticks;
+    if (suit == Suit.Balls) return balls;
+    never(suit);
   }
 }
 
 export type Meld = Tile[] & { _meld: true };
+export type MeldKind = readonly TileKind[] & { _meld: true };
 
 export namespace Meld {
-  export const all: Meld[] = [];
-  function define(a: Tile[]): Meld {
-    const meld = Object.freeze(a) as Meld;
-    all.push(meld);
-    return meld
+  export function of(tiles: Tile[]): Meld {
+    return tiles as Meld;
   }
 
-  export const allThrees = Tile.all.map(t => define([t, t, t]));
-  export const allFours = Tile.all.map(t => define([t, t, t, t]));
-  export const allSequences = [Tile.cracks, Tile.sticks, Tile.balls].flatMap(suit => [
+
+  export const all: MeldKind[] = [];
+  function define(a: TileKind[]): MeldKind {
+    const tiles = Object.freeze(a) as MeldKind;
+    all.push(tiles);
+    return tiles;
+  }
+
+  export const allThrees = TileKind.all.map(t => define([t, t, t]));
+  export const allFours = TileKind.all.map(t => define([t, t, t, t]));
+  export const allSequences = [TileKind.cracks, TileKind.sticks, TileKind.balls].flatMap(suit => [
     define([suit[0], suit[1], suit[2]]),
     define([suit[1], suit[2], suit[3]]),
     define([suit[2], suit[3], suit[4]]),
@@ -187,41 +232,61 @@ export namespace Meld {
     define([suit[6], suit[7], suit[8]]),
   ]);
 
-  export function three(tile: Tile) {
-    const meld = allThrees.find(meld => meld[0] == tile);
-    assert(meld != null, 'invalid three');
-    return meld;
+  export function getSequenceOptions(kind: TileKind) {
+    if (kind.suit == Suit.Dragon || kind.suit == Suit.Wind) {
+      return [];
+    } else {
+      const index = TileKind.numbered(kind.suit);
+      const get = (n: number) => index[n - 1];
+
+      const results = [];
+
+      if (kind.value > 2)
+        results.push([get(kind.value - 2), get(kind.value - 1)]);
+      if (kind.value > 1 && kind.value < 9)
+        results.push([get(kind.value - 1), get(kind.value + 1)]);
+      if (kind.value < 8)
+        results.push([get(kind.value + 1), get(kind.value + 2)]);
+
+      return results;
+    }
   }
 
-  export function four(tile: Tile) {
-    const meld = allFours.find(meld => meld[0] == tile);
-    assert(meld != null, 'invalid four');
-    return meld;
+  export function isIdentical(a: Meld, b: Meld) {
+    const tiles = unique(a, Tile.equals);
+    return tiles.every(tile => {
+      const aTiles = a.filter(t => Tile.equals(t, tile));
+      const bTiles = b.filter(t => Tile.equals(t, tile));
+      return aTiles.length == bTiles.length;
+    });
   }
 
-  export function sequence(tiles: Tile[]) {
-    const meld = allSequences.find(meld => tiles.every(tile => meld.includes(tile)));
-    assert(meld != null, 'invalid sequence');
-    return meld;
+  export function getRest(meld: Meld, kind: TileKind) {
+    const rest = [...meld];
+    const index = rest.findIndex(tile => tile.kind == kind);
+    assert(index != -1, 'invalid meld');
+    rest.splice(index, 1);
+    return rest;
   }
 
-  export function equals(a: Tile[], b: Tile[]) {
-    return a.every(t => b.includes(t)) && b.every(t => a.includes(t));
-  }
-
-  export function isThree(tiles: Tile[]): boolean {
-    const unique = new Set(tiles);
+  export function isTriple(tiles: Meld): boolean {
+    const unique = new Set(tiles.map(t => t.kind));
     return tiles.length == 3 && unique.size == 1;
   }
 
-  export function isFour(tiles: Tile[]): boolean {
-    const unique = new Set(tiles);
+  export function isQuad(tiles: Meld): boolean {
+    const unique = new Set(tiles.map(t => t.kind));
     return tiles.length == 4 && unique.size == 1;
   }
 
-  export function isSequence(tiles: Tile[]): boolean {
-    const suits = new Set(tiles.map(t => t.suit));
-    const numbers = tiles.map(t => t.value);
+  export function isSet(tiles: Meld): boolean {
+    const unique = new Set(tiles.map(t => t.kind));
+    return unique.size == 1;
+  }
+
+  export function isSequence(tiles: Meld): boolean {
+    const suits = new Set(tiles.map(t => t.kind.suit));
+    const numbers = tiles.map(t => t.kind.value);
     return tiles.length == 3 && suits.size == 1 && numbers.some(t => numbers.includes(t + 1) && numbers.includes(t + 2));
   }
 }

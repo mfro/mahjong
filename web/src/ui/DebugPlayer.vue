@@ -33,9 +33,9 @@ import { computed } from 'vue';
 
 import { Game, Meld, Player } from '@/common';
 import { CONTEXT } from './common';
+import { assert } from '@mfro/ts-common/assert';
 
 import Button from 'primevue/button';
-import Card from 'primevue/card';
 
 import Flex from './common/Flex.vue';
 import UIHand from './UIHand.vue';
@@ -63,7 +63,11 @@ const options = computed(() => {
 const canPass = computed(() => options.value.length > 0);
 
 function call(meld: Meld) {
-  context.input({ type: 'call', player: index.value, meld });
+  assert(game.state.type == 'calling', 'invalid call')
+  const hand = [...Player.getAllTiles(props.player), game.state.tile];
+  // TODO optional ron
+  const win = Game.isHandWin(hand);
+  context.input({ type: 'call', player: index.value, meld, win });
 }
 
 function pass() {

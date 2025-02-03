@@ -24,7 +24,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import type { Tile } from '@/common';
+import type { Tile, TileKind } from '@/common';
 import { getArt } from '@/art';
 
 const emit = defineEmits<{
@@ -32,40 +32,15 @@ const emit = defineEmits<{
 }>();
 
 const props = defineProps<{
-  tile?: Tile,
+  tile?: Tile | TileKind,
   small?: boolean,
   active?: boolean,
   rotated?: boolean,
   spacer?: boolean,
 }>();
 
-const art = computed(() => props.tile && getArt(props.tile));
-
-// export default {
-//   name: 'tile',
-
-//   emits: ['click'],
-//   props: {
-//     tile: Object,
-//     kind: Object,
-//     small: Boolean,
-//     active: Boolean,
-//     rotated: Boolean,
-//     spacer: Boolean,
-//   },
-
-//   setup(props, { emit }) {
-//     const kind = computed(() => {
-//       return props.kind ?? props.tile?.kind;
-//     });
-
-//     const art = computed(() => {
-//       return kind.value?.art;
-//     });
-
-//     return { art };
-//   },
-// };
+const kind = computed(() => props.tile && ('isRed' in props.tile ? props.tile.kind : props.tile));
+const art = computed(() => kind.value && getArt(kind.value));
 </script>
 
 <style lang="scss" scoped>

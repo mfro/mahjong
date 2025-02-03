@@ -33,7 +33,7 @@ const context = CONTEXT.get();
 const game = context.game;
 
 const sorted = computed(() => {
-  return props.player.hand.slice().sort(Tile.compare);
+  return [...props.player.hand].sort(Tile.compare);
 });
 
 const isActive = computed(() => props.player == context.localPlayer)
