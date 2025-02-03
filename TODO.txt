@@ -1,5 +1,5 @@
 - furiten
-- swap calls
+- swap calling
 - kan promotion
 - winning conditions
 - ron

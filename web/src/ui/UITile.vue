@@ -1,12 +1,11 @@
 <template>
   <div class="spacer" :class="{ small, rotated }" v-if="spacer" />
 
-  <div
-    class="tile"
-    :class="{ small, rotated, active }"
-    v-else
-    @click="active && $emit('click', tile)"
-  >
+  <div v-else
+       class="tile"
+       :class="{ small, rotated, active }"
+       @click="active && emit('click')">
+
     <div class="front" v-if="art">
       <div class="shadow1" />
       <div class="shadow2" />
@@ -22,47 +21,66 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
 import { computed } from 'vue';
 
-export default {
-  name: 'tile',
+import type { Tile } from '@/common';
+import { getArt } from '@/art';
 
-  emits: ['click'],
-  props: {
-    tile: Object,
-    kind: Object,
-    small: Boolean,
-    active: Boolean,
-    rotated: Boolean,
-    spacer: Boolean,
-  },
+const emit = defineEmits<{
+  click: [],
+}>();
 
-  setup(props, { emit }) {
-    const kind = computed(() => {
-      return props.kind ?? props.tile?.kind;
-    });
+const props = defineProps<{
+  tile?: Tile,
+  small?: boolean,
+  active?: boolean,
+  rotated?: boolean,
+  spacer?: boolean,
+}>();
 
-    const art = computed(() => {
-      return kind.value?.art;
-    });
+const art = computed(() => props.tile && getArt(props.tile));
 
-    return { art };
-  },
-};
+// export default {
+//   name: 'tile',
+
+//   emits: ['click'],
+//   props: {
+//     tile: Object,
+//     kind: Object,
+//     small: Boolean,
+//     active: Boolean,
+//     rotated: Boolean,
+//     spacer: Boolean,
+//   },
+
+//   setup(props, { emit }) {
+//     const kind = computed(() => {
+//       return props.kind ?? props.tile?.kind;
+//     });
+
+//     const art = computed(() => {
+//       return kind.value?.art;
+//     });
+
+//     return { art };
+//   },
+// };
 </script>
 
 <style lang="scss" scoped>
+@use "sass:color";
+
 // $width: 5.336179295vh;
 $width: 4.8vh;
-$height: $width * 30 / 23;
-$rounding: $width * 0.1;
-$hover-offset: $width * 0.2;
+$height: calc($width * 30 / 23);
+$rounding: calc($width * 0.1);
+$hover-offset: calc($width * 0.2);
 
 .spacer {
   margin: 0.213447172vh;
   width: $width;
-  height: ($height + $width * 0.15);
+  height: calc($height + $width * 0.15);
 
   &.small {
     transform: scale(0.6);
@@ -70,7 +88,6 @@ $hover-offset: $width * 0.2;
 }
 
 .tile {
-  margin: 0.213447172vh;
   display: flex;
   position: relative;
   transition: transform 10ms ease-in-out;
@@ -252,7 +269,7 @@ $hover-offset: $width * 0.2;
     }
 
     .shadow2 {
-      background-color: darken(#f0f0f0, 20%);
+      background-color: color.adjust(#f0f0f0, $lightness: -20%);
       top: ($width * 0.05);
       width: $width;
       height: $height;
@@ -272,7 +289,7 @@ $hover-offset: $width * 0.2;
     pointer-events: none;
 
     .body {
-      background-color: lighten(#da7c0c, 8%);
+      background-color: color.adjust(#da7c0c, $lightness: +8%);
       top: $width * 0.15;
       // left: 9px;
       width: $width;
@@ -282,7 +299,7 @@ $hover-offset: $width * 0.2;
     }
 
     .shadow1 {
-      background-color: darken(#f0f0f0, 20%);
+      background-color: color.adjust(#f0f0f0, $lightness: -20%);
       width: $width;
       height: $height;
       position: absolute;

@@ -1,5 +1,5 @@
 /* eslint-disable */
-declare module '!raw-loader!*' {
+declare module '*?raw' {
   const component: string;
   export default component;
 }
