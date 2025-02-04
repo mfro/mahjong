@@ -261,14 +261,6 @@ export namespace Meld {
     });
   }
 
-  export function getRest(meld: Meld, kind: TileKind) {
-    const rest = [...meld];
-    const index = rest.findIndex(tile => tile.kind == kind);
-    assert(index != -1, 'invalid meld');
-    rest.splice(index, 1);
-    return rest;
-  }
-
   export function isTriple(tiles: Meld): boolean {
     const unique = new Set(tiles.map(t => t.kind));
     return tiles.length == 3 && unique.size == 1;

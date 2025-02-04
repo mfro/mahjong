@@ -11,3 +11,18 @@ export function filterMap<T, V>(array: T[], fn: (value: T) => false | undefined 
 export function unique<T>(array: T[], equals: (a: T, b: T) => boolean = (a, b) => a == b) {
   return array.filter((value, i) => array.findIndex(v => equals(value, v)) == i);
 }
+
+export function tryRemoveFirst<T>(array: T[], value: T) {
+  const index = array.indexOf(value);
+  if (index == -1) {
+    return false;
+  } else {
+    array.splice(index, 1);
+    return true;
+  }
+}
+
+export function removeFirst<T>(array: T[], value: T) {
+  const success = tryRemoveFirst(array, value);
+  assert(success, 'invalid removeFirst');
+}

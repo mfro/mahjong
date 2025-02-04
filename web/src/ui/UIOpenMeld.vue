@@ -11,7 +11,7 @@
 import { computed } from 'vue';
 
 import { CONTEXT } from './common';
-import { Game, Meld, Tile, TileKind, type OpenMeld, type Player } from '@/common';
+import { Game, type OpenMeld, type Player } from '@/common';
 
 import Flex from './common/Flex.vue';
 import UITile from './UITile.vue';
@@ -38,8 +38,7 @@ const rotated = computed(() => {
 
 const tiles = computed(() => {
   const claimed = props.meld.claimed;
-  const rest = Meld.getRest(props.meld.value, claimed.kind)
-    .sort(Tile.compare);
+  const rest = props.meld.value.filter(tile => tile != claimed);
 
   if (props.meld.claimedFrom == Game.previousPlayer(game, playerIndex.value))
     return [claimed, ...rest];

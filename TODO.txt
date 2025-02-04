@@ -1,6 +1,4 @@
-- furiten
 - swap calling
-- kan promotion
 - winning conditions
-- ron
 - tsumo
+- riichi

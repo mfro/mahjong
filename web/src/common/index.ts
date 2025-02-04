@@ -1,4 +1,4 @@
-import { filterMap, unique } from '@/util';
+import { filterMap, never, removeFirst, unique } from '@/util';
 import { Meld, Tile, TileKind, Wind } from './tiles';
 import { assert } from '@mfro/ts-common/assert';
 
@@ -23,10 +23,10 @@ export interface OpenMeld {
 
 export interface Player {
   hand: Tile[];
-  draw: Tile | null;
   discard: Tile[];
   open: OpenMeld[];
   declaredQuads: Meld[];
+  isTemporaryFuriten: boolean;
 }
 
 export namespace Player {
@@ -35,25 +35,57 @@ export namespace Player {
       ...player.declaredQuads.flat(),
       ...player.open.flatMap(meld => meld.value),
       ...player.hand,
-      ...(player.draw ? [player.draw] : []),
     ];
+  }
+
+  export function hasDraw(player: Player) {
+    return getAllTiles(player).length == 14
+      + player.declaredQuads.length
+      + player.open.filter(m => Meld.isQuad(m.value)).length
+  }
+
+  export function getDrawTile(player: Player) {
+    if (Player.hasDraw(player)) {
+      return player.hand[player.hand.length - 1];
+    } else {
+      return null;
+    }
   }
 }
 
 export type Hand =
-  | { melds: Meld[]; pair: Tile[] }
-  | { pairs: Tile[][] }
-  | { orphans: Tile[]; pair: Tile[] };
+  | { type: 'classic', melds: Meld[]; pair: Tile[] }
+  | { type: '7 pairs', pairs: Tile[][] }
+  | { type: 'orphans', orphans: Tile[]; pair: Tile[] };
 
-interface CallOption {
+export namespace Hand {
+  export function isComplete(hand: Hand) {
+    if (hand.type == 'classic') {
+      return hand.melds.length == 4;
+    } else if (hand.type == '7 pairs') {
+      return hand.pairs.length == 7;
+    } else if (hand.type == 'orphans') {
+      return hand.orphans.length == 12;
+    } else {
+      never(hand);
+    }
+  }
+}
+
+export interface CallOption {
   player: number;
   result: Meld;
 }
 
-interface Call {
+export interface Call {
   player: number;
   result: Meld;
   win: boolean;
+}
+
+export interface PromoteQuadOption {
+  tile: Tile;
+  meld: OpenMeld;
 }
 
 export type GameState =
@@ -62,7 +94,9 @@ export type GameState =
   | { type: 'calling', from: number, tile: Tile, pending: CallOption[], called: Call[] };
 
 export type Input =
-  | { type: 'declare quad', tile: Meld }
+  | { type: 'declare quad', meld: Meld }
+  | { type: 'promote quad', option: PromoteQuadOption }
+
   | { type: 'discard', tile: Tile }
   | { type: 'call', player: number, meld: Meld, win: boolean }
   | { type: 'pass', player: number }
@@ -89,9 +123,7 @@ export namespace Game {
   }
 
   export function isHandComplete(hand: Tile[]) {
-    assert(hand.length == 14, 'invalid hand');
-
-    const hands = buildHands(hand);
+    const hands = buildHands(hand).filter(hand => Hand.isComplete(hand));
 
     return hands.length > 0;
   }
@@ -100,6 +132,32 @@ export namespace Game {
   export function isHandWin(hand: Tile[]) {
     // TODO winning conditions
     return isHandComplete(hand);
+  }
+
+  export function getAllDiscarded(game: Game, player: Player) {
+    return [
+      ...player.discard,
+      ...game.players.flatMap(player => filterMap(player.open, meld => game.players[meld.claimedFrom] == player && meld.claimed))
+    ]
+  }
+
+  export function isDiscardFuriten(game: Game, player: Player) {
+    return getAllDiscarded(game, player).some(tile => isWaitingFor(game, player, tile));
+  }
+
+  export function isFuriten(game: Game, player: Player): boolean {
+    return player.isTemporaryFuriten || isDiscardFuriten(game, player);
+  }
+
+  export function isWaitingFor(game: Game, player: Player, tile: Tile) {
+    const waits = findWaits(player).map(wait => wait.seed);
+    return waits.includes(tile.kind);
+  }
+
+  export function canWinOffDiscard(game: Game, player: Player, discard: Tile): boolean {
+    const hand = [...Player.getAllTiles(player), discard];
+
+    return isHandWin(hand) && !isFuriten(game, player);
   }
 
   function buildMelds(kinds: readonly TileKind[], hand: Tile[]): Tile[][] {
@@ -122,15 +180,15 @@ export namespace Game {
     return results;
   }
 
-  export function buildHands(hand: Tile[]): Hand[] {
+  function buildHands(hand: Tile[]): Hand[] {
     if (hand.length == 2) {
       if (hand[0] == hand[1])
-        return [{ melds: [], pair: hand }];
+        return [{ type: 'classic', melds: [], pair: hand }];
 
       return [];
     }
 
-    const list = [];
+    const list: Hand[] = [];
     for (const kinds of Meld.all) {
       const melds = buildMelds(kinds, hand).map(Meld.of);
       const options = unique(melds, Meld.isIdentical);
@@ -138,8 +196,9 @@ export namespace Game {
       for (const option of options) {
         const remainingHand = hand.filter(t => !option.includes(t));
         for (const tail of buildHands(remainingHand)) {
-          assert('melds' in tail, '7 pairs?');
+          assert(tail.type == 'classic', '7 pairs?');
           list.push({
+            type: 'classic',
             melds: [option, ...tail.melds],
             pair: tail.pair,
           });
@@ -151,13 +210,13 @@ export namespace Game {
   }
 
   /** Find all tiles that would complete the specified hand */
-  export function findWaits(melds: Meld[], hand: Tile[]) {
+  export function findWaits(player: Player) {
     const waits = [];
 
     for (const kind of TileKind.all) {
       const tile = Tile.plain(kind);
-      const hands = buildHands([tile, ...hand]);
-      if (hands.length == 0) return;
+      const hands = buildHands([tile, ...player.hand]);
+      if (hands.length == 0) return [];
 
       waits.push({ seed: kind, hands });
     }
@@ -220,10 +279,10 @@ export namespace Game {
 
       players.push({
         hand,
-        draw: null,
         discard: [],
         open: [],
         declaredQuads: [],
+        isTemporaryFuriten: false,
       });
     }
 
@@ -275,7 +334,7 @@ export namespace Game {
     const drawTile = game.deck.shift();
     assert(drawTile != null, 'invalid deck state');
 
-    game.players[player].draw = drawTile;
+    game.players[player].hand.push(drawTile);
     game.state = { type: 'discarding', player };
   }
 
@@ -283,10 +342,10 @@ export namespace Game {
     if (game.deck.length == 14) {
       game.state = { type: 'done' };
     } else {
-      const next = game.deck.pop();
-      assert(next != null, 'invalid draw');
+      const drawTile = game.deck.pop();
+      assert(drawTile != null, 'invalid draw');
 
-      game.players[player].draw = next;
+      game.players[player].hand.push(drawTile);
       game.state = { type: 'discarding', player };
     }
   }
@@ -310,20 +369,25 @@ export namespace Game {
       .pop();
 
     if (call) {
-      const target = game.players[call.player];
-      target.open.push({
+      const meld: OpenMeld = {
         value: call.result,
         claimed: game.state.tile,
         claimedFrom: game.state.from,
-      });
+      };
 
-      for (const tile of Meld.getRest(call.result, game.state.tile.kind)) {
-        const index = target.hand.indexOf(tile)
-        target.hand.splice(index, 1);
+      const target = game.players[call.player];
+      target.open.push(meld);
+
+      for (const tile of meld.value.filter(tile => tile != meld.claimed)) {
+        removeFirst(target.hand, tile);
       }
 
       const victim = game.players[game.state.from];
       victim.discard.pop();
+
+      if (Meld.isQuad(meld.value)) {
+        applyQuad(game, call.player);
+      }
 
       game.state = { type: 'discarding', player: call.player };
     } else {
@@ -336,31 +400,54 @@ export namespace Game {
       && game.players[game.state.player] == player;
   }
 
-  export function getQuadOptions(game: Game) {
+  export function getPromoteQuadOptions(game: Game): PromoteQuadOption[] {
+    if (game.state.type != 'discarding') {
+      return []
+    }
+
+    const player = game.players[game.state.player];
+    if (!Player.hasDraw(player)) {
+      return [];
+    }
+
+    return filterMap(player.hand, tile => {
+      const meld = player.open.find(m => Meld.isTriple(m.value) && m.value[0].kind == tile.kind);
+      return meld && {
+        tile,
+        meld,
+      }
+    });
+  }
+
+  export function getDeclareQuadOptions(game: Game): Meld[] {
     if (game.state.type != 'discarding' || getDeclaredQuads(game).length == 4) {
       return [];
     }
 
     const player = game.players[game.state.player];
-    const unique = [...new Set(player.hand)];
-    const tiles = unique.filter(tile => player.hand.filter(t => tile == t).length == 4);
-    return tiles;
+    const kinds = [...new Set(player.hand.map(c => c.kind))];
+
+    const options = [];
+
+    for (const kind of kinds) {
+      const tiles = player.hand.filter(t => t.kind == kind);
+      if (tiles.length == 4) {
+        options.push(Meld.of(tiles));
+      }
+    }
+
+    return options;
   }
 
   export function discard(game: Game, tile: Tile) {
     assert(game.state.type == 'discarding', 'invalid discard');
 
     const player = game.players[game.state.player];
-    if (player.draw) {
-      player.hand.push(player.draw);
-      player.draw = null;
-    }
 
-    const index = player.hand.indexOf(tile);
-    assert(index != -1, 'invalid discard');
-
-    player.hand.splice(index, 1);
+    removeFirst(player.hand, tile);
     player.discard.push(tile);
+    // TODO riichi
+    player.isTemporaryFuriten = false;
 
     const pending: CallOption[] = [];
     for (const other of otherPlayers(game, game.state.player)) {
@@ -396,12 +483,22 @@ export namespace Game {
     const player = game.players[game.state.player];
 
     for (const tile of meld) {
-      const index = player.hand.indexOf(tile);
-      assert(index != -1, 'invalid declare quad');
-      player.hand.splice(index);
+      removeFirst(player.hand, tile);
     }
 
     player.declaredQuads.push(meld);
+
+    applyQuad(game, game.state.player);
+  }
+
+  export function promoteQuad(game: Game, option: PromoteQuadOption) {
+    assert(game.state.type == 'discarding', 'invalid discard');
+    const player = game.players[game.state.player];
+
+    assert(player.open.includes(option.meld), 'invalid promote quad');
+    option.meld.value = Meld.of([...option.meld.value, option.tile]);
+
+    applyQuad(game, game.state.player);
   }
 
   export function call(game: Game, player: number, meld: Meld, win: boolean) {
@@ -426,6 +523,10 @@ export namespace Game {
 
     game.state.pending = game.state.pending.filter(p => p.player != player);
 
+    if (isWaitingFor(game, game.players[player], game.state.tile)) {
+      game.players[player].isTemporaryFuriten = true;
+    }
+
     updateCallState(game);
   }
 
@@ -433,7 +534,9 @@ export namespace Game {
     if (input.type == 'discard') {
       discard(game, input.tile);
     } else if (input.type == 'declare quad') {
-      declareQuad(game, input.tile);
+      declareQuad(game, input.meld);
+    } else if (input.type == 'promote quad') {
+      promoteQuad(game, input.option);
     } else if (input.type == 'call') {
       call(game, input.player, input.meld, input.win);
     } else if (input.type == 'pass') {
